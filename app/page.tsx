@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input"
 import { MetricsCard } from "@/components/metrics-card"
 import { StatsChart } from "@/components/stats-chart"
 import { FundingTable } from "@/components/funding-table"
+import { ProfileButton } from "@/components/auth/ProfileButton"
 import {
   BarChart3,
   ChevronDown,
@@ -67,19 +68,14 @@ export default function Page() {
               <h1 className="text-2xl font-bold">Startup Funding Overview</h1>
               <div className="text-sm text-muted-foreground">Aug 13, 2023 - Aug 18, 2023</div>
             </div>
-            <div className="flex gap-2">
-              <Link href="/startup-profile">
-                <Button variant="outline" className="gap-2 text-gray-700">
-                  My Startup Profile
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </Link>
+            <div className="flex items-center gap-4">
               <Link href="/chat">
                 <Button className="bg-blue-600 text-white hover:bg-blue-700">
                   <MessageSquare className="mr-2 h-4 w-4" />
                   AI Assistant
                 </Button>
               </Link>
+              <ProfileButton />
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
