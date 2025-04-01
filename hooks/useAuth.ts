@@ -11,7 +11,7 @@ import {
   signInWithPopup,
   getAuth
 } from 'firebase/auth';
-import { auth } from '@/lib/firebase/config';
+import { auth } from '@/lib/firebase/firebase.config';
 import { useRouter } from 'next/navigation';
 
 export function useAuth() {
@@ -20,8 +20,6 @@ export function useAuth() {
   const router = useRouter();
 
   useEffect(() => {
-    // This ensures we're using the same auth instance
-    const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUser(user);
