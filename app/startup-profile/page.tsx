@@ -7,20 +7,30 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import * as pdfjsLib from 'pdfjs-dist'
-import { PDFDocumentProxy } from 'pdfjs-dist'
+
+// Import PDF.js types
+import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 export default function StartupProfilePage() {
   const [pdfInitialized, setPdfInitialized] = useState(false);
+  const [pdfjs, setPdfjs] = useState<any>(null);
 
   useEffect(() => {
     const initializePdf = async () => {
       try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-        setPdfInitialized(true);
+        if (typeof window !== 'undefined') {
+          // Dynamically import PDF.js
+          const pdfjsModule = await import('pdfjs-dist');
+          
+          // Set the worker source to use the CDN version
+          pdfjsModule.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          
+          setPdfjs(pdfjsModule);
+          setPdfInitialized(true);
+        }
       } catch (error) {
         console.error('Error initializing PDF.js:', error);
         setError('Failed to initialize PDF processor. Please refresh the page.');
@@ -46,23 +56,42 @@ export default function StartupProfilePage() {
 
   const extractTextFromPdf = async (file: File): Promise<string> => {
     try {
+      if (!pdfjs || !pdfInitialized) {
+        throw new Error('PDF processor is not ready. Please try again.');
+      }
+
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const loadingTask = pdfjs.getDocument({ 
+        data: arrayBuffer,
+        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        cMapPacked: true
+      });
+      
+      const pdf = await loadingTask.promise;
       let fullText = '';
 
       for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items
-          .map((item: any) => item.str)
-          .join(' ');
-        fullText += pageText + '\n';
+        try {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .map((item: any) => item.str)
+            .join(' ');
+          fullText += pageText + '\n';
+        } catch (pageError) {
+          console.error(`Error processing page ${i}:`, pageError);
+          continue;
+        }
+      }
+
+      if (!fullText.trim()) {
+        throw new Error('No text content could be extracted from the PDF');
       }
 
       return fullText;
     } catch (error) {
       console.error('Error extracting PDF text:', error);
-      throw new Error('Failed to extract text from PDF');
+      throw new Error(`Failed to extract text from PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
