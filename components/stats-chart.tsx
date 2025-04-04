@@ -30,7 +30,9 @@ export function StatsChart() {
                     <div className="grid grid-cols-2 gap-2">
                       <div className="flex flex-col">
                         <span className="text-[0.70rem] uppercase text-muted-foreground">Funding</span>
-                        <span className="font-bold text-muted-foreground">${payload[0].value.toLocaleString()}</span>
+                        <span className="font-bold text-muted-foreground">
+                          ${payload[0]?.value?.toLocaleString() || '0'}
+                        </span>
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[0.70rem] uppercase text-muted-foreground">Month</span>
