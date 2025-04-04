@@ -1,3 +1,25 @@
+
+"use client"
+
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { auth } from '@/lib/firebase'
+import { onAuthStateChanged } from 'firebase/auth'
+
+export default function Home() {
+  const router = useRouter()
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        router.push('/dashboard')
+      } else {
+        router.push('/auth')
+      }
+    })
+
+    return () => unsubscribe()
+  }, [router])
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -18,8 +40,11 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
-export default function Page() {
+
   return (
+
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="text-xl font-semibold">Loading...</div>
     <div className="min-h-screen bg-gray-100 text-gray-900">
       <div className="grid lg:grid-cols-[280px_1fr]">
         <aside className="border-r bg-white">
@@ -118,6 +143,7 @@ export default function Page() {
           </div>
         </main>
       </div>
+
     </div>
   )
 }
