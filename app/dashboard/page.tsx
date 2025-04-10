@@ -20,20 +20,57 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { auth } from "@/lib/firebase"
+import { auth, db } from "@/lib/firebase"
 import { signOut } from "firebase/auth"
 import { onAuthStateChanged } from "firebase/auth"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
 
 export default function DashboardPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
+  const [startupName, setStartupName] = useState("StartupFund")
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         router.push('/auth')
+        return
       }
-      setIsLoading(false)
+      
+      try {
+        // Fetch startup profiles from Firestore - using the same collection as in the profile page
+        const profilesRef = collection(db, 'startup_profiles')
+        const q = query(profilesRef, where('userId', '==', user.uid))
+        const querySnapshot = await getDocs(q)
+        
+        // Get the most recently created profile (if multiple exist)
+        if (!querySnapshot.empty) {
+          let newestProfile = null
+          let newestDate = new Date(0) // Start with oldest possible date
+          
+          querySnapshot.forEach(doc => {
+            const profileData = doc.data()
+            if (profileData.createdAt) {
+              const profileDate = new Date(profileData.createdAt)
+              
+              // If this profile is newer than our current newest, update it
+              if (profileDate > newestDate) {
+                newestDate = profileDate
+                newestProfile = profileData
+              }
+            }
+          })
+          
+          // If we found a profile, set the startup name
+          if (newestProfile && 'name' in newestProfile && newestProfile.name) {
+            setStartupName(newestProfile.name)
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching startup profile:", error)
+      } finally {
+        setIsLoading(false)
+      }
     })
 
     return () => unsubscribe()
@@ -62,7 +99,7 @@ export default function DashboardPage() {
         <aside className="border-r bg-white">
           <div className="flex h-16 items-center gap-2 border-b px-6">
             <Wallet className="h-6 w-6 text-blue-600" />
-            <span className="font-bold text-blue-600">StartupFund</span>
+            <span className="font-bold text-blue-600">{startupName}</span>
           </div>
           <div className="px-4 py-4">
             <Input placeholder="Search" className="bg-gray-100" />
@@ -78,10 +115,13 @@ export default function DashboardPage() {
               <BarChart3 className="h-4 w-4" />
               Funding Opportunities
             </Button>
-            <Button variant="ghost" className="w-full justify-start gap-2">
-              <Globe className="h-4 w-4" />
-              Investor Network
-            </Button>
+            <Link href="/investor-network">
+  <Button variant="ghost" className="w-full justify-start gap-2">
+    <Globe className="h-4 w-4" />
+    Investor Network
+  </Button>
+</Link>
+
             <Button variant="ghost" className="w-full justify-start gap-2">
               <Home className="h-4 w-4" />
               My Startup
@@ -112,7 +152,7 @@ export default function DashboardPage() {
         <main className="p-6">
           <div className="mb-6 flex items-center justify-between">
             <div className="space-y-1">
-              <h1 className="text-2xl font-bold">Startup Funding Overview</h1>
+              <h1 className="text-2xl font-bold">{startupName} Funding Overview</h1>
               <div className="text-sm text-muted-foreground">Aug 13, 2023 - Aug 18, 2023</div>
             </div>
             <div className="flex gap-2">
@@ -172,4 +212,4 @@ export default function DashboardPage() {
       </div>
     </div>
   )
-} 
+}

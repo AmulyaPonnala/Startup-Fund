@@ -11,9 +11,6 @@ import { db, auth } from "@/lib/firebase"
 import { collection, addDoc, getDocs, query, where, updateDoc, doc } from "firebase/firestore"
 import { useAuthState } from "react-firebase-hooks/auth"
 
-// Import PDF.js types
-import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
@@ -22,6 +19,9 @@ export default function StartupProfilePage() {
   const [pdfInitialized, setPdfInitialized] = useState(false);
   const [pdfjs, setPdfjs] = useState<any>(null);
   const [savedProfiles, setSavedProfiles] = useState<any[]>([]);
+  const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string | null>(null);
+  const [autoSaveTimeout, setAutoSaveTimeout] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const initializePdf = async () => {
@@ -42,6 +42,11 @@ export default function StartupProfilePage() {
   }, []);
 
   useEffect(() => {
+    console.log("Firebase auth state:", user);
+    console.log("Firebase auth initialized:", auth);
+  }, [user]);
+
+  useEffect(() => {
     const fetchProfiles = async () => {
       if (!user) return;
       
@@ -56,7 +61,7 @@ export default function StartupProfilePage() {
         setSavedProfiles(profiles);
       } catch (error) {
         console.error('Error fetching profiles:', error);
-        setError('Failed to load saved profiles');
+        setError(`Failed to fetch profiles: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     };
 
@@ -77,6 +82,45 @@ export default function StartupProfilePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Auto-save functionality (unchanged)
+  useEffect(() => {
+    if (!currentProfileId || !user) return;
+    
+    if (autoSaveTimeout) {
+      clearTimeout(autoSaveTimeout);
+    }
+    
+    const timeout = setTimeout(async () => {
+      try {
+        setAutoSaveStatus('Saving...');
+        const profileRef = doc(db, 'startup_profiles', currentProfileId);
+        await updateDoc(profileRef, {
+          ...formData,
+          updatedAt: new Date().toISOString()
+        });
+        
+        setSavedProfiles(prev => prev.map(profile => 
+          profile.id === currentProfileId 
+            ? { ...profile, ...formData, updatedAt: new Date().toISOString() } 
+            : profile
+        ));
+        
+        setAutoSaveStatus('Changes saved');
+        setTimeout(() => setAutoSaveStatus(null), 3000);
+      } catch (error) {
+        console.error('Error auto-saving:', error);
+        setAutoSaveStatus('Save failed');
+        setTimeout(() => setAutoSaveStatus(null), 3000);
+      }
+    }, 1000);
+    
+    setAutoSaveTimeout(timeout);
+    
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [formData, currentProfileId, user]);
+
   const saveProfile = async () => {
     if (!user) {
       setError('Please sign in to save profiles');
@@ -86,20 +130,19 @@ export default function StartupProfilePage() {
     try {
       setLoading(true);
       const profilesRef = collection(db, 'startup_profiles');
-      await addDoc(profilesRef, {
+      const docRef = await addDoc(profilesRef, {
         ...formData,
         userId: user.uid,
         createdAt: new Date().toISOString()
       });
       
-      // Refresh profiles list
-      const q = query(profilesRef, where('userId', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      const profiles = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setSavedProfiles(profiles);
+      setCurrentProfileId(docRef.id);
+      setSavedProfiles(prev => [...prev, {
+        id: docRef.id,
+        ...formData,
+        userId: user.uid,
+        createdAt: new Date().toISOString()
+      }]);
       
       setError(null);
     } catch (error) {
@@ -124,15 +167,11 @@ export default function StartupProfilePage() {
         updatedAt: new Date().toISOString()
       });
       
-      // Refresh profiles list
-      const profilesRef = collection(db, 'startup_profiles');
-      const q = query(profilesRef, where('userId', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      const profiles = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setSavedProfiles(profiles);
+      setSavedProfiles(prev => prev.map(profile => 
+        profile.id === profileId 
+          ? { ...profile, ...formData, updatedAt: new Date().toISOString() } 
+          : profile
+      ));
       
       setError(null);
     } catch (error) {
@@ -141,6 +180,40 @@ export default function StartupProfilePage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadProfile = (profile: any) => {
+    setFormData({
+      name: profile.name || '',
+      industries: profile.industries || '',
+      funding_stage: profile.funding_stage || '',
+      funding_amount: profile.funding_amount || '',
+      preferred_investment_firm: profile.preferred_investment_firm || '',
+      location: profile.location || '',
+      revenue: profile.revenue || '',
+      growth_metrics: profile.growth_metrics || '',
+      tech_stack: profile.tech_stack || ''
+    });
+    setCurrentProfileId(profile.id);
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      industries: '',
+      funding_stage: '',
+      funding_amount: '',
+      preferred_investment_firm: '',
+      location: '',
+      revenue: '',
+      growth_metrics: '',
+      tech_stack: ''
+    });
+    setCurrentProfileId(null);
+  };
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const extractTextFromPdf = async (file: File): Promise<string> => {
@@ -200,10 +273,8 @@ export default function StartupProfilePage() {
       setLoading(true);
       setError(null);
 
-      // Extract text from PDF
       const pdfText = await extractTextFromPdf(file);
       
-      // Send to Gemini API
       const response = await fetch(GEMINI_URL, {
         method: "POST",
         headers: {
@@ -215,7 +286,7 @@ export default function StartupProfilePage() {
               text: `Extract and format the following information from this startup pitch deck text. Use exactly these labels:
 
 Startup Name: [name]
-Industries: [industry types]
+Industries: Select only ONE industry from this list that most closely matches the startup's focus: AI, AgriTech, CleanTech, Cybersecurity, E-commerce, EdTech, Fintech, Gaming, HealthTech, SaaS. Provide only the single best match.
 Funding Stage: [stage]
 Funding Amount: [amount]
 Preferred Investment Firm: [firm type]
@@ -238,13 +309,12 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
       }
 
       const data = await response.json();
-      console.log('Raw API Response:', data); // Debug log
+      console.log('Raw API Response:', data);
 
       if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
         const extractedText = data.candidates[0].content.parts[0].text;
-        console.log('Extracted text:', extractedText); // Debug log
+        console.log('Extracted text:', extractedText);
         
-        // Split by newlines and clean up the lines
         const lines = extractedText.split('\n')
           .map((line: string) => line.trim())
           .filter((line: string) => line && line.includes(':'));
@@ -253,13 +323,12 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
         let filledFields = 0;
 
         for (const line of lines) {
-          // Handle cases where there might be multiple colons
           const colonIndex = line.indexOf(':');
           const key = line.substring(0, colonIndex).trim();
           const value = line.substring(colonIndex + 1).trim();
           
-          if (value) {  // Only update if there's a value
-            console.log('Processing:', { key, value }); // Debug log
+          if (value) {
+            console.log('Processing:', { key, value });
             
             switch(key) {
               case 'Startup Name':
@@ -302,7 +371,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
           }
         }
         
-        console.log('Updated form data:', newData); // Debug log
+        console.log('Updated form data:', newData);
         setFormData(newData);
         
         setTimeout(() => setError(null), 5000);
@@ -343,6 +412,9 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
               {error && (
                 <p className="text-red-500 text-sm mt-2">{error}</p>
               )}
+              {autoSaveStatus && (
+                <p className="text-green-500 text-sm mt-2">{autoSaveStatus}</p>
+              )}
             </div>
 
             {loading && (
@@ -356,7 +428,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Startup Name</label>
                 <Input 
                   value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  onChange={(e) => handleInputChange('name', e.target.value)}
                   className={formData.name ? 'border-green-500' : ''}
                 />
               </div>
@@ -365,7 +437,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Industries</label>
                 <Input
                   value={formData.industries}
-                  onChange={(e) => setFormData(prev => ({ ...prev, industries: e.target.value }))}
+                  onChange={(e) => handleInputChange('industries', e.target.value)}
                 />
               </div>
 
@@ -373,7 +445,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Funding Stage</label>
                 <Input
                   value={formData.funding_stage}
-                  onChange={(e) => setFormData(prev => ({ ...prev, funding_stage: e.target.value }))}
+                  onChange={(e) => handleInputChange('funding_stage', e.target.value)}
                 />
               </div>
 
@@ -381,7 +453,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Funding Amount</label>
                 <Input
                   value={formData.funding_amount}
-                  onChange={(e) => setFormData(prev => ({ ...prev, funding_amount: e.target.value }))}
+                  onChange={(e) => handleInputChange('funding_amount', e.target.value)}
                 />
               </div>
 
@@ -389,7 +461,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Preferred Investment Firm</label>
                 <Input
                   value={formData.preferred_investment_firm}
-                  onChange={(e) => setFormData(prev => ({ ...prev, preferred_investment_firm: e.target.value }))}
+                  onChange={(e) => handleInputChange('preferred_investment_firm', e.target.value)}
                 />
               </div>
 
@@ -397,7 +469,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Location</label>
                 <Input
                   value={formData.location}
-                  onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                  onChange={(e) => handleInputChange('location', e.target.value)}
                 />
               </div>
 
@@ -405,7 +477,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Revenue</label>
                 <Input
                   value={formData.revenue}
-                  onChange={(e) => setFormData(prev => ({ ...prev, revenue: e.target.value }))}
+                  onChange={(e) => handleInputChange('revenue', e.target.value)}
                 />
               </div>
 
@@ -413,7 +485,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Growth Metrics</label>
                 <Input
                   value={formData.growth_metrics}
-                  onChange={(e) => setFormData(prev => ({ ...prev, growth_metrics: e.target.value }))}
+                  onChange={(e) => handleInputChange('growth_metrics', e.target.value)}
                 />
               </div>
 
@@ -421,18 +493,35 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <label className="block text-sm font-medium mb-2">Tech Stack</label>
                 <Input
                   value={formData.tech_stack}
-                  onChange={(e) => setFormData(prev => ({ ...prev, tech_stack: e.target.value }))}
+                  onChange={(e) => handleInputChange('tech_stack', e.target.value)}
                 />
               </div>
             </div>
 
             <div className="mt-6 flex gap-4">
-              <Button 
-                onClick={saveProfile}
-                disabled={loading}
-              >
-                Save Profile
-              </Button>
+              {currentProfileId ? (
+                <>
+                  <Button 
+                    onClick={() => updateProfile(currentProfileId)}
+                    disabled={loading}
+                  >
+                    Save Profile
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={resetForm}
+                  >
+                    New Profile
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  onClick={saveProfile}
+                  disabled={loading}
+                >
+                  Save As New Profile
+                </Button>
+              )}
             </div>
 
             {savedProfiles.length > 0 && (
@@ -440,7 +529,7 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                 <h2 className="text-xl font-semibold mb-4">Saved Profiles</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {savedProfiles.map((profile) => (
-                    <Card key={profile.id}>
+                    <Card key={profile.id} className={currentProfileId === profile.id ? "border-2 border-blue-500" : ""}>
                       <CardHeader>
                         <CardTitle>{profile.name}</CardTitle>
                         <CardDescription>
@@ -456,9 +545,9 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
                         <Button
                           variant="outline"
                           className="mt-4"
-                          onClick={() => updateProfile(profile.id)}
+                          onClick={() => loadProfile(profile)}
                         >
-                          Update
+                          Edit
                         </Button>
                       </CardContent>
                     </Card>
@@ -472,4 +561,3 @@ Text to analyze: ${pdfText.substring(0, 5000)}`
     </div>
   );
 }
-
