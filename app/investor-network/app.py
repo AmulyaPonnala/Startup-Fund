@@ -191,6 +191,9 @@ def predict():
         true_relevance = investors_df.loc[valid_indices, "Relevance"].astype(float).values
         predicted_scores = final_df.loc[valid_indices, "final_score"].values
         ndcg = ndcg_score([true_relevance], [predicted_scores], k=10) if len(true_relevance) > 0 else 0.0
+        
+        # Log NDCG score to console
+        logger.info(f"NDCG Score: {ndcg:.4f}")
 
         # Prepare JSON response
         result = top_10.to_dict(orient='records')
